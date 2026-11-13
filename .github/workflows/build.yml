@@ -1,0 +1,60 @@
+name: build
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.find.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: find
+        run: |
+          matrix=$(.github/scripts/discover-kernels.sh)
+          jq . <<<"$matrix"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: discover
+    runs-on: ubuntu-latest
+    container: debian:${{ matrix.suite }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.discover.outputs.matrix) }}
+    name: build (${{ matrix.kver }}, ${{ matrix.suite }})
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install headers
+        run: .github/scripts/install-headers.sh "${{ matrix.suite }}" "${{ matrix.kver }}"
+      - name: Build
+        run: .github/scripts/build.sh "${{ matrix.kver }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cdh_input_guard-${{ matrix.kver }}
+          path: out/*.ko
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: Add udev rule and checksums
+        run: |
+          cp udev/71-cdh-virtual-input.rules out/
+          cd out && sha256sum * > SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: out/*

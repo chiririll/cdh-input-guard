@@ -1,0 +1,24 @@
+# Keep systemd-logind on the host away from virtual input devices.
+#
+# 70-power-switch.rules tags every event node that has keys or switches with
+# "power-switch". logind opens tagged nodes and acts on KEY_POWER, KEY_SLEEP,
+# KEY_SUSPEND, KEY_RESTART and the lid switch, so a container could power off
+# or suspend the host through uinput. This file must sort after 70.
+#
+# TAG-= alone is not enough. When it removes the last tag of a device, udev
+# (at least systemd 252-259) still sends the old CURRENT_TAGS=:power-switch:
+# property with the event, and logind opens the node anyway. With one more
+# tag on the device udev sends the correct list, so add "cdh-virtual-input".
+# Do not drop that tag.
+#
+# Works without the kernel module. It also covers the host's own uinput/uhid
+# devices; real power buttons (ACPI, USB) are not under /devices/virtual.
+
+ACTION=="remove", GOTO="cdh_virtual_input_end"
+SUBSYSTEM!="input", GOTO="cdh_virtual_input_end"
+KERNEL!="event*", GOTO="cdh_virtual_input_end"
+
+DEVPATH=="/devices/virtual/input/*", TAG-="power-switch", TAG+="cdh-virtual-input"
+DEVPATH=="/devices/virtual/misc/uhid/*", TAG-="power-switch", TAG+="cdh-virtual-input"
+
+LABEL="cdh_virtual_input_end"
